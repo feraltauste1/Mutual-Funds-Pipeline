@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tr-funds-pipeline"
+version = "0.1.0"
+description = "Pipeline sencillo por ISIN para Trade Republic España"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.2,<3", "numpy>=2,<3", "yfinance>=0.2.66,<1",
+  "requests>=2.32,<3", "pypdf>=6,<7", "matplotlib>=3.9,<4",
+  "nbformat>=5.10,<6", "nbclient>=0.10,<1", "ipykernel>=6.29,<8",
+  "jupyterlab>=4,<5", "scikit-learn>=1.5,<2", "websockets>=15,<17"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[project.scripts]
+tr-pipeline = "tr_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+

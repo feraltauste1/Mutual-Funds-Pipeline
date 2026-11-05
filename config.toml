@@ -1,0 +1,22 @@
+# Los precios se descargan desde esta fecha hasta el último día COMPLETO.
+start = "2020-01-01"
+country = "ES"
+catalog_source = "public" # Explorador público de TR; "pdf" solo como alternativa parcial.
+# Máximo por tipo, siguiendo el orden predeterminado del explorador público TR.
+# Es un proxy de relevancia, no un ranking por rentabilidad ni por patrimonio.
+max_assets_per_type = 250
+base_currency = "EUR"
+cache_hours = 24
+request_pause_seconds = 0.3
+retries = 2
+max_stale_business_days = 5
+max_imputed_fraction = 0.05
+min_observed_fraction = 0.90
+cluster_unknown = true
+# Actívalo si necesitas bloquear cualquier ejecución sin catálogo completo acreditado.
+require_complete_universe = false
+# Vacío: catálogo público de TR + aportaciones en data/manual/universe.csv.
+# Para una lista completa: ruta a CSV con TODOS los tipos y manifest adyacente .json.
+authoritative_catalog = ""
+catalog_max_age_days = 7
+

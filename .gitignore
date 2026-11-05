@@ -216,5 +216,16 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Descargas y resultados regenerables. Los CSV manuales sí se versionan.
+data/catalog/*
+!data/catalog/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+reports/*
+!reports/README.md
+
+
 # Streamlit
 .streamlit/secrets.toml
