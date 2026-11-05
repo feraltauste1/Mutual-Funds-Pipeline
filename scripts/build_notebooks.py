@@ -94,12 +94,32 @@ Solo si falta esa clasificación se agrupan trayectorias mediante clustering (m�
 4 activos y 60 observaciones comunes). El resultado se llama «grupo estadístico»,
 sin atribuirle un sector económico inventado. Las categorías conocidas se conservan.
 ''')]
-    cells += [nbf.v4.new_markdown_cell('''## 4. Top 5 global y por sector/categoría
+    ranking_text = '''## 4. Top 5 global y por sector/categoría
 
 Orden: rentabilidad total de los últimos **12 meses en EUR**, con idéntica fecha de referencia.
 Si hay menos de cinco activos elegibles se muestran los que existan. Acciones, fondos y ETF
 se clasifican por separado. Los activos sin datos suficientes siguen visibles en el informe de cobertura.
-'''), nbf.v4.new_code_cell('show_rankings(RESULT)')]
+'''
+    if kind != "stock":
+        ranking_text = '''## 4. Top 5 global y por sector/categoría
+
+Orden: **rentabilidad histórica anualizada (CAGR) en EUR**, de mayor a menor.
+Justo a la derecha del CAGR se muestra la **rentabilidad de los últimos 12 meses**.
+El criterio se aplica tanto al top global como al top por sector/categoría.
+
+`CAGR = ((precio ajustado EUR final / inicial) ** (1 / años) - 1) * 100`
+
+Se usa todo el histórico descargado desde el primer precio observado de cada ISIN
+hasta el último, con años = días naturales / 365,25. Es una media compuesta, no una
+media aritmética. Se muestran las fechas y los años porque los periodos pueden ser distintos;
+el inicio configurado limita el histórico y no equivale necesariamente a toda la vida del fondo.
+
+Se conservan los filtros existentes: un año completo, datos recientes y calidad del último año.
+Los huecos del histórico completo se muestran en la tabla de limpieza; el CAGR usa los extremos
+observados, sin extrapolar una fecha inicial anterior. Los activos excluidos siguen visibles en EDA.
+Si hay menos de cinco activos elegibles se muestran los disponibles. Fondos y ETF se clasifican por separado.
+'''
+    cells += [nbf.v4.new_markdown_cell(ranking_text), nbf.v4.new_code_cell('show_rankings(RESULT)')]
     save(filename, cells)
 
 save("04_conclusiones.ipynb", [
@@ -109,7 +129,12 @@ Este notebook lee los resultados de los otros tres análisis. Si faltan o cambia
 la fecha, el catálogo, el código, la configuración o un CSV manual, recalcula el pipeline necesario.
 También puedes actualizarlo todo con `tr-pipeline notebooks`.
 
-**Lectura rápida:** el puesto 1 es el activo que más ha subido en el último año, en euros.
+**Lectura rápida:** en fondos y ETF el puesto 1 tiene la mayor **rentabilidad histórica
+anualizada (CAGR) en EUR**. La columna inmediatamente a su derecha muestra la rentabilidad
+de los **últimos 12 meses**. Las fechas inicial/final y los años indican el periodo disponible;
+puede variar entre activos y no equivale necesariamente a toda su vida.
+Se conservan los filtros de calidad del último año y se auditan también los huecos del histórico completo.
+Las acciones mantienen su ranking por rentabilidad de los últimos 12 meses.
 Es una clasificación de rendimiento pasado. No indica qué comprar.
 Un informe parcial se identifica antes de mostrar sus rankings.
 '''),

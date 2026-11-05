@@ -128,7 +128,7 @@ def run_asset_type(root: Path, kind: str, refresh=False, offline=False, limit=No
                       "downloaded_at": payload["downloaded_at"], "identity_source": payload["identity_source"],
                       "distribution": tr_meta.get("distribution"),
                       "benchmark": tr_meta.get("index"), "ter": tr_meta.get("ter"),
-                      **price_metrics(clean, cfg, as_of)}
+                      **price_metrics(clean, cfg, as_of, include_history=kind != "stock")}
             if quality["conflicting_duplicates"]:
                 result["eligible"] = False
                 result["exclusion_reason"] += "; Duplicados con precios en conflicto: revisar"
@@ -167,9 +167,14 @@ def run_asset_type(root: Path, kind: str, refresh=False, offline=False, limit=No
             failures.append({"isin": isin, "name": row["name"], "reason": str(exc)})
             print(f"  Pendiente: {exc}", flush=True)
     metrics_df = pd.DataFrame(metrics) if metrics else pd.DataFrame(columns=METRIC_COLUMNS)
+    if kind != "stock":
+        # El CAGR y el último año permanecen contiguos también en los CSV exportados.
+        leading = ["isin", "name", "sector", "sector_source", "return_historical_annualized_pct",
+                   "return_12m_pct", "history_start_date", "last_date", "history_years"]
+        metrics_df = metrics_df.reindex(columns=leading + [c for c in metrics_df if c not in leading])
     if cfg["cluster_unknown"] and not metrics_df.empty:
         metrics_df = cluster_unknown(metrics_df, returns)
-    top_global, top_sector = rank(metrics_df)
+    top_global, top_sector = rank(metrics_df, kind)
     artifacts = {
         "metrics.csv": metrics_df,
         "quality.csv": pd.DataFrame(qualities, columns=["isin", "raw_rows", "duplicate_dates",
@@ -206,7 +211,10 @@ def run_asset_type(root: Path, kind: str, refresh=False, offline=False, limit=No
                 "complete_analysis": (catalog_complete and not selection_limited and limit is None
                                       and not isins and len(failures) == 0),
                 "signature": input_signature(root, cfg, catalog_manifest, kind, limit, isins),
-                "warnings": ["Ranking por retorno total a 12 meses en EUR, con cierre anterior al día actual.",
+                "ranking_metric": "return_12m_pct" if kind == "stock" else "return_historical_annualized_pct",
+                "warnings": [("Ranking por retorno total a 12 meses en EUR, con cierre anterior al día actual."
+                              if kind == "stock" else
+                              "Ranking por rentabilidad histórica anualizada (CAGR) en EUR; periodos según cada activo."),
                              "Los grupos de fondos son categorías; un cluster no acredita un sector."]}
     json_write(manifest_path, manifest)
     return {"manifest": manifest, "metrics": metrics_df, "top_global": top_global, "top_sector": top_sector}
@@ -244,8 +252,9 @@ def conclusions(root: Path, refresh_dependencies=True, offline=False) -> dict:
     if refresh_dependencies:
         ensure_results(root, offline=offline)
     all_results = {}
-    lines = ["# Resultados de Trade Republic", "", "**Clasificación por rentabilidad pasada a un año en EUR.**",
-             "El primer puesto ha subido más; no significa que vaya a hacerlo mejor en el futuro.", "",
+    lines = ["# Resultados de Trade Republic", "", "**Clasificación por rentabilidad pasada en EUR.**",
+             "Fondos y ETF: histórico anualizado (CAGR). Acciones: últimos 12 meses.",
+             "El primer puesto lidera según ese criterio; no significa que vaya a hacerlo mejor en el futuro.", "",
              "Medias y retornos usan precios ajustados por distribuciones y splits.",
              "Los precios de Yahoo pueden corresponder a otra bolsa del mismo ISIN; no son cotizaciones de ejecución de TR.", ""]
     for kind in ASSET_TYPES:
@@ -258,6 +267,14 @@ def conclusions(root: Path, refresh_dependencies=True, offline=False) -> dict:
                   f"Con precios: {manifest['downloaded']} de {manifest['attempted']} ISIN seleccionados "
                   f"(universo publicado: {manifest.get('published_total', manifest['catalog_total'])}). "
                   f"Con un año y calidad suficiente: {manifest['eligible']}. Errores: {manifest['failed']}.", ""]
+        if kind != "stock":
+            lines += ["**Orden: histórico anualizado (CAGR) en EUR, de mayor a menor.** "
+                      "La columna de la derecha muestra los últimos 12 meses.", "",
+                      "CAGR = ((precio ajustado EUR final / inicial)^(1 / años) - 1) × 100. "
+                      "Se usa todo el histórico descargado de cada ISIN, no necesariamente toda su vida. "
+                      "Las fechas y los años se muestran porque los periodos pueden ser distintos. "
+                      "Los filtros de calidad conservan la comprobación de los últimos 12 meses; "
+                      "los huecos del histórico completo se auditan en quality.csv.", ""]
         lines += [f"Criterio de selección: {manifest.get('selection_method', 'Ver catálogo')}. "
                   "La selección previa por relevancia es independiente del ranking por rentabilidad.", ""]
         if not manifest["complete_analysis"]:
@@ -265,12 +282,12 @@ def conclusions(root: Path, refresh_dependencies=True, offline=False) -> dict:
                       manifest["catalog_note"], ""]
         if manifest["scope_limited"]:
             lines += ["**Ejecución de prueba con límite de activos.**", ""]
-        lines += ["### Top 5 global", "", table_markdown(global_top), "", "### Top 5 por sector o categoría", ""]
+        lines += ["### Top 5 global", "", table_markdown(global_top, kind), "", "### Top 5 por sector o categoría", ""]
         if sector_top.empty:
             lines += ["No hay activos elegibles para clasificar.", ""]
         else:
             for sector, group in sector_top.groupby("sector", sort=True):
-                lines += [f"**{sector}**", "", table_markdown(group), ""]
+                lines += [f"**{sector}**", "", table_markdown(group, kind), ""]
         if kind == "stock":
             signals = metrics.loc[metrics.get("pe_discount_pct", pd.Series(dtype=float)).notna()] if (
                 "pe_discount_pct" in metrics) else pd.DataFrame()
@@ -294,12 +311,21 @@ def conclusions(root: Path, refresh_dependencies=True, offline=False) -> dict:
     return all_results
 
 
-def table_markdown(frame: pd.DataFrame) -> str:
+def table_markdown(frame: pd.DataFrame, kind: str = "stock") -> str:
     if frame.empty:
         return "Sin datos elegibles. No se inventan cinco resultados."
-    lines = ["| Puesto | ISIN | Nombre | Rentabilidad 1 año |", "| --- | --- | --- | ---: |"]
+    historical = kind in {"mutual_fund", "etf"}
+    lines = (["| Puesto | ISIN | Nombre | Histórico anualizado (CAGR) | Últimos 12 meses | Desde | Hasta | Años |",
+              "| --- | --- | --- | ---: | ---: | --- | --- | ---: |"] if historical else
+             ["| Puesto | ISIN | Nombre | Rentabilidad 1 año |", "| --- | --- | --- | ---: |"])
     for _, row in frame.iterrows():
         name = str(row["name"]).replace("|", "/").replace("\n", " ")
-        lines.append(f"| {int(row['rank'])} | {row['isin']} | {name} | {row['return_12m_pct']:.2f}% |")
+        prefix = f"| {int(row['rank'])} | {row['isin']} | {name} |"
+        if historical:
+            lines.append(f"{prefix} {row['return_historical_annualized_pct']:.2f}% | "
+                         f"{row['return_12m_pct']:.2f}% | {row['history_start_date']} | "
+                         f"{row['last_date']} | {row['history_years']:.2f} |")
+        else:
+            lines.append(f"{prefix} {row['return_12m_pct']:.2f}% |")
     return "\n".join(lines)
 

@@ -9,7 +9,7 @@ from nbclient import NotebookClient
 
 from tr_pipeline.catalog import build_catalog
 from tr_pipeline.common import csv_write, json_write
-from tr_pipeline.pipeline import conclusions, run_all, select_assets
+from tr_pipeline.pipeline import conclusions, run_all, select_assets, table_markdown
 from tr_pipeline.providers import eur_rates, resolve
 
 REPO = Path(__file__).resolve().parents[1]
@@ -44,6 +44,18 @@ def test_end_to_end_artifacts_and_conclusions_invalidate(workspace):
     result = run_all(workspace, offline=True)
     assert set(result) == {"stock", "mutual_fund", "etf"}
     assert all(v["manifest"]["downloaded"] == 1 for v in result.values())
+    for kind in ("mutual_fund", "etf"):
+        top = result[kind]["top_global"]
+        assert result[kind]["manifest"]["ranking_metric"] == "return_historical_annualized_pct"
+        assert np.isfinite(top.return_historical_annualized_pct.iloc[0])
+        columns = top.columns.tolist()
+        assert columns.index("return_12m_pct") == columns.index("return_historical_annualized_pct") + 1
+        header = table_markdown(top, kind).splitlines()[0]
+        assert "| Histórico anualizado (CAGR) | Últimos 12 meses |" in header
+        assert "| Desde | Hasta | Años |" in header
+    assert "return_historical_annualized_pct" not in result["stock"]["top_global"]
+    assert result["stock"]["manifest"]["ranking_metric"] == "return_12m_pct"
+    assert "CAGR" not in table_markdown(result["stock"]["top_global"])
     before = result["etf"]["manifest"]["run_id"]
     # El alcance predeterminado de 250 no se considera un ensayo que deba repetirse.
     reused = conclusions(workspace, offline=True)
@@ -57,6 +69,7 @@ def test_end_to_end_artifacts_and_conclusions_invalidate(workspace):
     assert after["etf"]["top_global"].return_12m_pct.iloc[0] > result["etf"]["top_global"].return_12m_pct.iloc[0]
     text = (workspace / "reports/conclusiones.md").read_text(encoding="utf-8")
     assert "US0378331005" in text and "IE00B03HD191" in text
+    assert "Histórico anualizado (CAGR) | Últimos 12 meses" in text
 
 
 def test_absent_price_is_reported_and_never_replaced_with_another_isin(workspace):
@@ -65,7 +78,33 @@ def test_absent_price_is_reported_and_never_replaced_with_another_isin(workspace
     funds = result["mutual_fund"]
     assert funds["manifest"]["failed"] == 1
     assert funds["top_global"].empty
+    assert "return_historical_annualized_pct" in funds["top_global"]
     assert not funds["manifest"]["complete_analysis"]
+
+
+def test_pipeline_uses_history_for_funds_and_etfs_but_last_year_for_stocks(workspace):
+    catalog_path = workspace / "data/manual/full.csv"
+    catalog = pd.read_csv(catalog_path)
+    original = dict(zip(catalog.asset_type, catalog["isin"], strict=True))
+    additions = [("US5949181045", "stock"), ("IE0031786696", "mutual_fund"), ("IE00B5BMR087", "etf")]
+    index = pd.bdate_range("2020-01-01", pd.Timestamp.today().normalize() - pd.Timedelta(days=1))
+    cutoff = index.searchsorted(index[-1] - pd.DateOffset(years=1), side="right") - 1
+    # Este rival gana en el último año (+20 %), pero solo acumula +8 % desde el inicio.
+    values = np.interp(np.arange(len(index)), [0, cutoff, len(index) - 1], [100, 90, 108])
+    for isin, kind in additions:
+        row = {"isin": isin, "name": "SYNTHETIC RECENT WINNER", "asset_type": kind,
+               "source": "https://example.com/test-fixture", "verified_at": str(pd.Timestamp.today().date())}
+        catalog = pd.concat([catalog, pd.DataFrame([row])], ignore_index=True)
+        csv_write(workspace / f"data/manual/prices/{isin}.csv", pd.DataFrame({
+            "date": index, "price": values, "adjusted_price": values, "currency": "EUR",
+            "source_url": "https://example.com/synthetic-data"}))
+    csv_write(catalog_path, catalog)
+    results = run_all(workspace, offline=True)
+    for kind in ("mutual_fund", "etf"):
+        assert results[kind]["top_global"].iloc[0]["isin"] == original[kind]
+        assert results[kind]["top_sector"].iloc[0]["isin"] == original[kind]
+        assert results[kind]["top_global"].iloc[0].return_12m_pct < results[kind]["top_global"].iloc[1].return_12m_pct
+    assert results["stock"]["top_global"].iloc[0]["isin"] == "US5949181045"
 
 
 def test_stale_or_wrong_country_catalog_cannot_be_declared_complete(workspace):

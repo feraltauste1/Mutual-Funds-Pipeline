@@ -133,7 +133,15 @@ clase a `data/manual/mappings.csv`.
 - Medias de **3, 6 y 12 meses naturales** y diferencia porcentual del precio actual
   frente a cada media, usando la misma serie ajustada en EUR. Se necesita la
   ventana completa; una serie nueva no aparenta tener un año de historia.
-- Top 5 global y por sector/categoría: **retorno total acumulado de 12 meses en EUR**.
+- Top 5 global y por sector/categoría de fondos y ETF: **rentabilidad histórica anualizada
+  (CAGR) en EUR**, de mayor a menor. La columna inmediatamente a su derecha muestra el
+  **retorno de los últimos 12 meses**. Se exportan también la fecha inicial, la final
+  y los años de histórico. `CAGR = ((precio ajustado EUR final / inicial)^(1/años) - 1) × 100`,
+  con años = días naturales / 365,25 y extremos observados. Se usa todo el histórico descargado
+  de cada ISIN desde la fecha configurada, no necesariamente toda su vida; los periodos
+  pueden diferir. Los filtros existentes de calidad y disponibilidad de un año se mantienen;
+  los huecos del histórico completo se auditan en `quality.csv` y en EDA.
+- Las acciones mantienen su ranking por **retorno total acumulado de 12 meses en EUR**.
   Se publican también retornos de 3 y 6 meses. No se mezclan divisas ni tipos de activos.
 - Referencia: día anterior a la ejecución, para evitar velas intradía sin cerrar.
   Cada activo conserva la fecha de su último precio real. Por defecto se excluyen
@@ -167,7 +175,7 @@ impiden la comparación. Los EPS ajustados del emisor pueden aportarse por CSV.
 Reglas sencillas, visibles en el código: PER al menos un 20% inferior a su mediana
 → «revisar posible value»; al menos un 20% superior y beneficio creciente
 → «revisar growth». No son recomendaciones de compra ni una valoración completa.
-Los top 5 de acciones se ordenan por retorno, como en fondos/ETF; estas señales
+Los top 5 de acciones se ordenan por retorno de los últimos 12 meses; estas señales
 de valoración aparecen en una tabla adicional sin mezclarse con ese ranking.
 
 ## Actualización y archivos

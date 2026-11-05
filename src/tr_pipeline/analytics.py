@@ -40,7 +40,7 @@ def clean_prices(raw: pd.DataFrame, start, end) -> tuple[pd.DataFrame, dict]:
     return frame, quality
 
 
-def price_metrics(prices: pd.DataFrame, cfg: dict, as_of=None) -> dict:
+def price_metrics(prices: pd.DataFrame, cfg: dict, as_of=None, *, include_history=False) -> dict:
     as_of = pd.Timestamp(as_of if as_of is not None else prices.index.max())
     series = prices.adjusted_price_eur
     last = prices.index.max()
@@ -50,6 +50,19 @@ def price_metrics(prices: pd.DataFrame, cfg: dict, as_of=None) -> dict:
               "adjusted_price_eur": float(series.iloc[-1]), "stale_business_days": stale,
               "imputed_fraction": float(prices.was_imputed.mean()), "observations": len(prices),
               "eligible": False, "exclusion_reason": ""}
+    if include_history:
+        # CAGR del histórico disponible: extremos observados, en EUR, y años naturales.
+        observed_prices = series.loc[~prices.was_imputed & series.notna()]
+        first = observed_prices.index.min()
+        final = observed_prices.index.max()
+        years = (final - first).days / 365.25 if len(observed_prices) else 0.0
+        result.update({
+            "history_start_date": str(first.date()) if len(observed_prices) else "",
+            "history_years": years,
+            "return_historical_annualized_pct": (
+                np.expm1(np.log(observed_prices.iloc[-1] / observed_prices.iloc[0]) / years) * 100
+                if years > 0 else np.nan),
+        })
     for months in (3, 6, 12):
         target = as_of - pd.DateOffset(months=months)
         base = series.loc[series.index <= target]
@@ -155,11 +168,12 @@ def cluster_unknown(metrics: pd.DataFrame, returns: dict[str, pd.Series]) -> pd.
     return result
 
 
-def rank(metrics: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def rank(metrics: pd.DataFrame, kind: str = "stock") -> tuple[pd.DataFrame, pd.DataFrame]:
     if metrics.empty:
         return metrics.copy(), metrics.copy()
-    eligible = metrics.loc[metrics.eligible & metrics.return_12m_pct.notna()].copy()
-    ordered = eligible.sort_values(["return_12m_pct", "isin"], ascending=[False, True])
+    criterion = "return_historical_annualized_pct" if kind in {"mutual_fund", "etf"} else "return_12m_pct"
+    eligible = metrics.loc[metrics.eligible & np.isfinite(metrics[criterion]) & metrics.return_12m_pct.notna()].copy()
+    ordered = eligible.sort_values([criterion, "isin"], ascending=[False, True])
     global_top = ordered.head(5).copy()
     sector_top = ordered.groupby("sector", sort=True, group_keys=False).head(5).copy()
     global_top["rank"] = range(1, len(global_top) + 1)

@@ -23,10 +23,17 @@ def show_coverage(result: dict):
 
 
 def show_rankings(result: dict):
-    display(Markdown("### Top 5 global por rentabilidad a un año en EUR\n\n" + table_markdown(result["top_global"])))
+    kind = result["manifest"]["asset_type"]
+    criterion = "rentabilidad a un año" if kind == "stock" else "rentabilidad histórica anualizada (CAGR)"
+    display(Markdown(f"### Top 5 global por {criterion} en EUR\n\n" + table_markdown(result["top_global"], kind)))
+    if kind != "stock":
+        display(Markdown("CAGR calculado desde el primer precio observado hasta el último del histórico descargado. "
+                         "Los periodos pueden diferir entre activos. A su derecha se muestra la rentabilidad de los "
+                         "últimos 12 meses. Los filtros de calidad se aplican al último año; consulta también "
+                         "los huecos de todo el histórico en la tabla de limpieza."))
     display(Markdown("### Top 5 por sector o categoría"))
     for sector, rows in result["top_sector"].groupby("sector", sort=True):
-        display(Markdown(f"**{sector}**\n\n" + table_markdown(rows)))
+        display(Markdown(f"**{sector}**\n\n" + table_markdown(rows, kind)))
     if result["top_sector"].empty:
         display(Markdown("Sin activos elegibles para clasificar."))
 
@@ -47,7 +54,20 @@ def show_eda(root: Path, kind: str, result: dict):
     display(Markdown("### Estadística descriptiva"))
     columns = ["return_3m_pct", "return_6m_pct", "return_12m_pct", "daily_log_return_mean",
                "annualized_volatility_pct", "max_drawdown_pct"]
+    if kind != "stock":
+        columns.insert(2, "return_historical_annualized_pct")
     display(metrics[columns].describe().T)
+    if kind != "stock":
+        display(Markdown("### Rentabilidad histórica anualizada y últimos 12 meses\n"
+                         "CAGR = ((precio final / inicial)^(1 / años) - 1) × 100, con precios ajustados en EUR. "
+                         "Es una media compuesta. El histórico disponible depende de cada ISIN y de la fecha "
+                         "inicial configurada."))
+        historical = metrics.sort_values(["return_historical_annualized_pct", "isin"], ascending=[False, True])
+        display(historical[["isin", "name", "return_historical_annualized_pct", "return_12m_pct",
+                            "history_start_date", "last_date", "history_years", "imputed_fraction",
+                            "eligible", "exclusion_reason"]].rename(columns={
+                                "return_historical_annualized_pct": "Histórico anualizado (CAGR) %",
+                                "return_12m_pct": "Últimos 12 meses %"}))
     display(Markdown("### Medias de 3, 6 y 12 meses frente al último precio ajustado en EUR\n"
                      "`vs_mean_*_pct`: cuánto está el precio por encima (+) o por debajo (-) de esa media."))
     display(metrics[["isin", "name", "adjusted_price_eur", "mean_3m", "vs_mean_3m_pct", "mean_6m",
